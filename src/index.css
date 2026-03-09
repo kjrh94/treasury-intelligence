@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    background-color: #ffffff;
+    color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@layer components {
+  .page-container {
+    @apply max-w-7xl mx-auto px-6;
+  }
+
+  .card {
+    @apply bg-white border border-gray-200 rounded-2xl;
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px -1px rgba(0,0,0,0.04);
+  }
+
+  .card-hover {
+    @apply transition-shadow duration-200;
+  }
+
+  .card-hover:hover {
+    box-shadow: 0 4px 12px 0 rgba(0,0,0,0.08), 0 2px 4px -1px rgba(0,0,0,0.05);
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl font-medium text-sm
+           hover:bg-blue-700 active:bg-blue-800 transition-colors duration-150 cursor-pointer
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 bg-white text-slate-800 border border-gray-300 px-5 py-2.5 rounded-xl font-medium text-sm
+           hover:bg-gray-50 active:bg-gray-100 transition-colors duration-150 cursor-pointer
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 text-slate-700 px-3 py-1.5 rounded-lg font-medium text-sm
+           hover:bg-gray-100 active:bg-gray-200 transition-colors duration-150 cursor-pointer;
+  }
+
+  .tab-item {
+    @apply relative pb-3 text-sm font-medium transition-colors duration-150 cursor-pointer select-none;
+  }
+
+  .tab-active {
+    @apply text-blue-600;
+  }
+
+  .tab-inactive {
+    @apply text-slate-500 hover:text-slate-800;
+  }
+
+  .coming-soon-badge {
+    @apply inline-flex items-center text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full;
+  }
+
+  .kpi-card {
+    @apply card p-5 flex items-start justify-between;
+  }
+
+  .chart-card {
+    @apply card p-6;
+  }
+
+  .spotlight-card {
+    background: linear-gradient(135deg, #f0f7ff 0%, #eef2ff 100%);
+    @apply border border-blue-100 rounded-2xl;
+  }
+
+  .ai-strip {
+    @apply bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 cursor-pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .ai-strip:hover {
+    @apply bg-blue-100;
+  }
+}
+
+/* Recharts */
+.recharts-cartesian-axis-tick-value {
+  font-size: 11px;
+  fill: #64748b;
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.recharts-legend-item-text {
+  font-size: 11px !important;
+  color: #475569 !important;
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  border-radius: 10px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+  font-family: 'IBM Plex Sans', sans-serif !important;
+  font-size: 12px !important;
+}

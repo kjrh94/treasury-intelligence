@@ -26,24 +26,6 @@ export interface IgnoreRule {
  * Extend this array to add new exclusion patterns.
  */
 export const IGNORE_RULES: IgnoreRule[] = [
-  // Interest accrual / accounting entries — not principal cashflows
-  {
-    id: 'IGNORE_INTEREST_ACCRUAL',
-    reason: 'Interest accrual entries are accounting movements, not principal cashflows',
-    updateTypeCode: 'MM1300',
-  },
-  // Reversal entries — negated transactions
-  {
-    id: 'IGNORE_REVERSAL',
-    reason: 'Reversal entries offset prior transactions and should not be double-counted',
-    updateTypeCode: 'MM1410',
-  },
-  // Fee/commission postings — not borrowing principal flows
-  {
-    id: 'IGNORE_FEE_POSTING',
-    reason: 'Fee or commission postings are cost entries, not principal borrowing flows',
-    updateTypeCode: 'MM1600',
-  },
   // Valuation / mark-to-market entries
   {
     id: 'IGNORE_VALUATION',

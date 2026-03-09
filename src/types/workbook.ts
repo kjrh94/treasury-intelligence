@@ -145,6 +145,48 @@ export type IgnoreCategory =
   | 'ZERO_AMOUNT'
   | 'OTHER';
 
+/**
+ * The stage at which a row's grouping was determined.
+ *   PRODUCT_TYPE_PRIMARY — Prd Type matched a known product master (strongest signal)
+ *   FALLBACK_EVIDENCE    — Prd Type missing/unknown; secondary fields used
+ *   ZERO_AMOUNT          — programmatic zero-amount exclusion
+ *   INSUFFICIENT_DATA    — no usable identifiers at all
+ */
+export type ClassificationStage =
+  | 'PRODUCT_TYPE_PRIMARY'
+  | 'FALLBACK_EVIDENCE'
+  | 'ZERO_AMOUNT'
+  | 'INSUFFICIENT_DATA';
+
+/**
+ * The specific rule ID applied during classification.
+ * Stored verbatim on every row for full auditability.
+ */
+export type ClassificationRuleApplied =
+  | 'BORROWINGS_PRODUCT_TYPE_MATCH'
+  | 'INVESTMENT_PRODUCT_TYPE_MATCH'
+  | 'FOREX_PRODUCT_TYPE_MATCH'
+  | 'BORROWINGS_DATA_FOUNDATION_MATCH'
+  | 'NON_BORROWINGS_DATA_FOUNDATION_MATCH'
+  | 'INVESTMENT_UPDATE_OR_DESC_MATCH'
+  | 'FOREX_UPDATE_OR_DESC_MATCH'
+  | 'BORROWINGS_FALLBACK_SIGNAL'
+  | 'ZERO_AMOUNT_EXCLUSION'
+  | 'INSUFFICIENT_DATA'
+  | 'NO_SIGNAL';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Product type master entry — built from Data Foundation left-side table
+// ─────────────────────────────────────────────────────────────────────────────
+export interface ProductTypeMasterEntry {
+  rawProductType: string;       // exact code as in Data Foundation (e.g. "TL")
+  rawInstrumentName: string;    // exact description (e.g. "Term Loans")
+  rawGrouping: string;          // exact grouping (e.g. "Borrowings")
+  normProductType: string;      // lowercase trimmed for matching
+  normGrouping: string;         // lowercase trimmed for matching
+  sourceRowNumber: number;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // C. Classified (derived) cashflow row — extends normalized
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,7 +200,11 @@ export interface ClassifiedCashflowRow extends CashflowNormalizedRow {
   mappingStatus: MappingStatus;
   mappingConfidence: 'high' | 'medium' | 'low' | 'none';
   mappingReason: string;
-  matchedOn: string | null;       // e.g. "updateTypeCode" | "updateTypeDesc" | "prdType" | "prdTypeDesc"
+  matchedOn: string | null;       // e.g. "prdType" | "updateTypeCode" | "fallback"
+
+  // Classification audit trail
+  classificationStage: ClassificationStage;
+  classificationRuleApplied: ClassificationRuleApplied;
 
   // Borrowings relevance flag — review support only, not final classification
   borrowingsRelevant: boolean;
@@ -202,10 +248,13 @@ export interface ParseSummary {
   totalMappedNonBorrowingsRows: number;
   totalUnmappedReviewRows: number;
   totalIgnoredRows: number;
+  totalIgnoredForexRows: number;
+  totalIgnoredInvestmentRows: number;
   totalInsufficientDataRows: number;
   uniqueBorrowingsUpdateTypes: string[];   // raw values
   uniqueUnmappedUpdateTypes: string[];     // raw values
   parseWarningsCount: number;
+  validationAssertionFailures: string[];   // any assertion violations found
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -220,12 +269,21 @@ export interface WorkbookSession {
   cashflowRawRows: CashflowRawRow[];
   cashflowNormalizedRows: CashflowNormalizedRow[];
 
+  // Product type master — built from Data Foundation left-side table
+  // Primary source of truth for grouping classification
+  productTypeMaster: ProductTypeMasterEntry[];
+
   // Classification datasets
   borrowingsMappingReference: BorrowingsMappingEntry[];
   classifiedCashflowRows: ClassifiedCashflowRow[];
 
   // Bucketed row views
-  borrowingsRows: ClassifiedCashflowRow[];
+  // borrowingsCandidateRows: Prd Type matched borrowings master (pre-exclusion)
+  // finalBorrowingsRows: same as borrowingsCandidateRows at this stage;
+  //   reserved for future sub-classification refinement
+  borrowingsCandidateRows: ClassifiedCashflowRow[];
+  finalBorrowingsRows: ClassifiedCashflowRow[];       // alias: use for all metrics
+  borrowingsRows: ClassifiedCashflowRow[];             // kept for backwards compat
   nonBorrowingsRows: ClassifiedCashflowRow[];
   unmappedReviewRows: ClassifiedCashflowRow[];
   ignoredRows: ClassifiedCashflowRow[];

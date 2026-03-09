@@ -53,13 +53,15 @@ function ParseSummarySection() {
     : 'text-red-600';
 
   const items = [
-    { label: 'Data Foundation rows',      value: s.totalDataFoundationRows,      variant: 'slate' as const },
-    { label: 'TCL Cashflow rows',          value: s.totalCashflowRows,            variant: 'slate' as const },
-    { label: 'Mapped — Borrowings',        value: s.totalMappedBorrowingsRows,    variant: 'green' as const },
-    { label: 'Mapped — Non-Borrowings',    value: s.totalMappedNonBorrowingsRows, variant: 'blue' as const },
-    { label: 'Unmapped — Review Required', value: s.totalUnmappedReviewRows,      variant: s.totalUnmappedReviewRows > 0 ? 'amber' as const : 'slate' as const },
-    { label: 'Ignored (explicit rules)',   value: s.totalIgnoredRows,             variant: 'slate' as const },
-    { label: 'Insufficient Data',          value: s.totalInsufficientDataRows,    variant: 'slate' as const },
+    { label: 'Data Foundation rows',      value: s.totalDataFoundationRows,        variant: 'slate' as const },
+    { label: 'TCL Cashflow rows',          value: s.totalCashflowRows,              variant: 'slate' as const },
+    { label: 'Borrowings',                 value: s.totalMappedBorrowingsRows,      variant: 'green' as const },
+    { label: 'Non-Borrowings',             value: s.totalMappedNonBorrowingsRows,   variant: 'blue' as const },
+    { label: 'Unmapped — Review',          value: s.totalUnmappedReviewRows,        variant: s.totalUnmappedReviewRows > 0 ? 'amber' as const : 'slate' as const },
+    { label: 'Ignored — Forex',            value: s.totalIgnoredForexRows,          variant: 'slate' as const },
+    { label: 'Ignored — Investments',      value: s.totalIgnoredInvestmentRows,     variant: 'slate' as const },
+    { label: 'Ignored — Other',            value: s.totalIgnoredRows - s.totalIgnoredForexRows - s.totalIgnoredInvestmentRows, variant: 'slate' as const },
+    { label: 'Insufficient Data',          value: s.totalInsufficientDataRows,      variant: 'slate' as const },
   ];
 
   return (
@@ -88,6 +90,22 @@ function ParseSummarySection() {
           </div>
         ))}
       </div>
+
+      {/* Assertion failures */}
+      {s.validationAssertionFailures.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-1 mt-2">
+          <p className="text-xs font-semibold text-red-800 flex items-center gap-1.5 mb-1.5">
+            <XCircle size={12} />
+            {s.validationAssertionFailures.length} Validation Assertion Failure{s.validationAssertionFailures.length > 1 ? 's' : ''}
+          </p>
+          {s.validationAssertionFailures.map((f, i) => (
+            <p key={i} className="text-xs text-red-700 flex items-start gap-1.5">
+              <span className="w-1 h-1 rounded-full bg-red-500 flex-shrink-0 mt-1.5" />
+              {f}
+            </p>
+          ))}
+        </div>
+      )}
 
       {/* Warnings */}
       {meta.parseWarnings.length > 0 && (
@@ -317,13 +335,20 @@ function IgnoredRowsSection() {
     return 'slate';
   };
 
+  const stageVariant = (stage: string | null): 'green' | 'blue' | 'amber' | 'slate' => {
+    if (stage === 'PRODUCT_TYPE_PRIMARY') return 'green';
+    if (stage === 'FALLBACK_EVIDENCE') return 'amber';
+    return 'slate';
+  };
+
   const columns = [
     { header: 'Row #',               render: (r: ClassifiedCashflowRow) => <span className="text-slate-400">{r.sourceRowNumber}</span> },
     { header: 'Category',            render: (r: ClassifiedCashflowRow) => r.ignoreCategory ? <Badge label={r.ignoreCategory} variant={categoryVariant(r.ignoreCategory)} /> : <span className="text-slate-300">—</span> },
+    { header: 'Stage',               render: (r: ClassifiedCashflowRow) => <Badge label={r.classificationStage} variant={stageVariant(r.classificationStage)} /> },
+    { header: 'Prd Type',            render: (r: ClassifiedCashflowRow) => r.rawPrdType ? <code className="bg-slate-100 px-1 rounded text-[10px]">{r.rawPrdType}</code> : <span className="text-slate-300">—</span> },
+    { header: 'Prd Type Desc',       render: (r: ClassifiedCashflowRow) => <span className="text-slate-600 max-w-[140px] truncate block" title={r.rawPrdTypeDesc}>{r.rawPrdTypeDesc || <span className="text-slate-300">—</span>}</span> },
     { header: 'UpdateType',          render: (r: ClassifiedCashflowRow) => r.rawUpdateType ? <code className="bg-slate-100 px-1 rounded text-[10px]">{r.rawUpdateType}</code> : <span className="text-slate-300">—</span> },
     { header: 'Update Type Desc',    render: (r: ClassifiedCashflowRow) => <span className="text-slate-600 max-w-[160px] truncate block" title={r.rawUpdateTypeDesc}>{r.rawUpdateTypeDesc || <span className="text-slate-300">—</span>}</span> },
-    { header: 'Prd Type',            render: (r: ClassifiedCashflowRow) => r.rawPrdType || <span className="text-slate-300">—</span> },
-    { header: 'Prd Type Desc',       render: (r: ClassifiedCashflowRow) => <span className="text-slate-600 max-w-[140px] truncate block" title={r.rawPrdTypeDesc}>{r.rawPrdTypeDesc || <span className="text-slate-300">—</span>}</span> },
     { header: 'Ignore Rule',         render: (r: ClassifiedCashflowRow) => r.ignoreRuleId ? <code className="bg-red-50 text-red-600 px-1 rounded text-[10px]">{r.ignoreRuleId}</code> : <span className="text-slate-300">—</span> },
     { header: 'Ignore Reason',       render: (r: ClassifiedCashflowRow) => <span className="text-slate-400 max-w-xs truncate block" title={r.ignoreReason ?? ''}>{r.ignoreReason ?? '—'}</span> },
   ];

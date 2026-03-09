@@ -28,11 +28,19 @@ import {
   type ClassifiedCashflowRow,
   type BorrowingsMappingEntry,
   type MappingStatus,
+  type ClassificationStage,
+  type ClassificationRuleApplied,
+  type ProductTypeMasterEntry,
   type ParseSummary,
   type RawWorkbookMeta,
   type WorkbookSession,
 } from '../types/workbook';
-import { findMatchingIgnoreRule, ZERO_AMOUNT_RULE } from './ignoreRules';
+import {
+  checkProductTypeMasterIgnore,
+  checkFallbackIgnore,
+  ZERO_AMOUNT_RULE,
+  BORROWINGS_PRODUCT_TYPE_CODES,
+} from './ignoreRules';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stage A — Workbook validation
@@ -433,6 +441,34 @@ function stageBC_parseCashflow(
 // Stage D — Mapping / classification
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Build the product type master from the Data Foundation left-side table.
+ * One entry per unique (grouping, productType) pair.
+ * This is the PRIMARY source of truth for grouping classification.
+ */
+function buildProductTypeMaster(
+  normalizedDF: DataFoundationNormalizedRow[],
+): ProductTypeMasterEntry[] {
+  const seen = new Set<string>();
+  const master: ProductTypeMasterEntry[] = [];
+
+  for (const r of normalizedDF) {
+    if (!r.rawProductType) continue;
+    const key = `${r.normGrouping}||${r.normProductType}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    master.push({
+      rawProductType:   r.rawProductType,
+      rawInstrumentName: r.rawInstrumentName,
+      rawGrouping:      r.rawGrouping,
+      normProductType:  r.normProductType,
+      normGrouping:     r.normGrouping,
+      sourceRowNumber:  r.sourceRowNumber,
+    });
+  }
+  return master;
+}
+
 /** Build the borrowings-focused mapping reference from Data Foundation rows. */
 function buildBorrowingsMappingReference(
   normalizedDF: DataFoundationNormalizedRow[],
@@ -456,122 +492,148 @@ function buildBorrowingsMappingReference(
 }
 
 /**
- * Borrowings-relevance heuristic.
- * This flag is for REVIEW SUPPORT only — it surfaces rows that look like
- * borrowings but are not confidently mapped. It must NOT be used for metrics.
+ * Look up a rawPrdType in the product type master built from Data Foundation.
+ * Returns the matching entry or null. Exact match on trimmed code.
+ */
+function lookupProductTypeMaster(
+  rawPrdType: string,
+  master: ProductTypeMasterEntry[],
+): ProductTypeMasterEntry | null {
+  if (!rawPrdType) return null;
+  const code = rawPrdType.trim();
+  return master.find(e => e.rawProductType.trim() === code) ?? null;
+}
+
+/**
+ * Borrowings-relevance heuristic — used ONLY on unknown-product-type rows
+ * as additional signal for UNMAPPED_REVIEW. Review support only, never metrics.
  */
 const BORROWINGS_RELEVANCE_KEYWORDS = [
   'borrow', 'loan', 'ncd', 'debenture', 'term loan', 'icd', 'ecb',
   'overdraft', 'cash credit', 'commercial paper', 'bond', 'trep',
-  'working capital', 'bill discounting', 'lc', 'bg', 'guarantee',
+  'working capital', 'bill discounting',
 ];
 
 function isBorrowingsRelevant(row: CashflowNormalizedRow): boolean {
-  const fields = [
-    row.normPrdTypeDesc,
-    row.normUpdateTypeDesc,
-    row.normPortfolioName,
-  ].join(' ');
+  const fields = [row.normPrdTypeDesc, row.normPortfolioName].join(' ');
   return BORROWINGS_RELEVANCE_KEYWORDS.some(kw => fields.includes(kw));
 }
 
 /**
- * Attempt to match a cashflow row against the Data Foundation mapping reference.
- * Returns the matched entry and the field that was used to match, or null.
+ * Stage D — Product-Type-First Classification
  *
- * Priority order per spec §9:
- *   P1: rawUpdateType ↔ updateTypeCode
- *   P2: rawUpdateTypeDesc ↔ updateTypeDesc
- *   P3: rawPrdType ↔ productType
- *   P4: rawPrdTypeDesc ↔ instrumentName (or related descriptive fields)
+ * Classification precedence (per spec §4):
+ *
+ *   Step 1 — PRODUCT_TYPE_PRIMARY (strongest signal)
+ *     1a. rawPrdType in INVESTMENTS_PRODUCT_TYPE_CODES → IGNORED_EXPLICIT (INVESTMENTS)
+ *     1b. rawPrdType in FOREX_PRODUCT_TYPE_CODES       → IGNORED_EXPLICIT (FOREX)
+ *     1c. rawPrdType in BORROWINGS_PRODUCT_TYPE_CODES  → MAPPED_BORROWINGS candidate
+ *     1d. rawPrdType found in Data Foundation master   → grouping from master
+ *
+ *   Step 2 — Zero-amount sentinel (programmatic)
+ *
+ *   Step 3 — Insufficient data
+ *
+ *   Step 4 — FALLBACK_EVIDENCE (Prd Type absent/unknown only)
+ *     4a. Fallback → Investments (updateType code or desc keyword)
+ *     4b. Fallback → Forex (updateType code or desc keyword)
+ *     4c. Fallback → Borrowings signal (heuristic keywords) → UNMAPPED_REVIEW
+ *     4d. Weak signal → UNMAPPED_REVIEW
+ *
+ * UpdateType is never used for grouping inclusion/exclusion in Step 1.
  */
-function matchToMapping(
-  row: CashflowNormalizedRow,
-  allNormDF: DataFoundationNormalizedRow[],
-): {
-  matchedEntry: DataFoundationNormalizedRow | null;
-  matchedOn: string | null;
-  confidence: 'high' | 'medium' | 'low' | 'none';
-} {
-  // P1: updateTypeCode exact match
-  if (row.rawUpdateType) {
-    const match = allNormDF.find(
-      m => m.rawUpdateTypeCode === row.rawUpdateType,
-    );
-    if (match) return { matchedEntry: match, matchedOn: 'updateTypeCode', confidence: 'high' };
-  }
-
-  // P2: updateTypeDesc exact match (case-insensitive, trimmed)
-  if (row.normUpdateTypeDesc) {
-    const match = allNormDF.find(
-      m => m.normUpdateTypeDesc !== '' && m.normUpdateTypeDesc === row.normUpdateTypeDesc,
-    );
-    if (match) return { matchedEntry: match, matchedOn: 'updateTypeDesc', confidence: 'high' };
-  }
-
-  // P3: prdType exact match
-  if (row.normPrdType) {
-    const match = allNormDF.find(
-      m => m.normProductType !== '' && m.normProductType === row.normPrdType,
-    );
-    if (match) return { matchedEntry: match, matchedOn: 'prdType', confidence: 'medium' };
-  }
-
-  // P4: prdTypeDesc substring match against instrumentName
-  if (row.normPrdTypeDesc) {
-    const match = allNormDF.find(
-      m =>
-        m.normInstrumentName !== '' &&
-        (
-          m.normInstrumentName.includes(row.normPrdTypeDesc) ||
-          row.normPrdTypeDesc.includes(m.normInstrumentName)
-        ),
-    );
-    if (match) return { matchedEntry: match, matchedOn: 'prdTypeDesc', confidence: 'low' };
-  }
-
-  return { matchedEntry: null, matchedOn: null, confidence: 'none' };
-}
-
 function stageD_classify(
   normalizedCF: CashflowNormalizedRow[],
-  normalizedDF: DataFoundationNormalizedRow[],
-  borrowingsRef: BorrowingsMappingEntry[],
+  productTypeMaster: ProductTypeMasterEntry[],
 ): ClassifiedCashflowRow[] {
-  // Build a lookup set of borrowings updateTypeCodes for fast reference
-  const borrowingsUpdateTypeCodes = new Set(
-    borrowingsRef.map(r => r.rawUpdateTypeCode).filter(Boolean),
-  );
 
   return normalizedCF.map(row => {
-    // 1. Check explicit ignore rules first (using raw values only)
-    const ignoreRule = findMatchingIgnoreRule(
-      row.rawUpdateType,
-      row.rawPrdType,
-      row.rawPrdTypeDesc,
-      row.rawUpdateTypeDesc,
-    );
-    if (ignoreRule) {
-      return {
-        ...row,
-        mappedGrouping: null,
-        mappedProductType: null,
-        mappedInstrumentName: null,
-        mappedFlowCode: null,
-        mappedFlowCategoryDesc: null,
-        mappingStatus: 'IGNORED_EXPLICIT' as MappingStatus,
-        mappingConfidence: 'none' as const,
-        mappingReason: `Matched ignore rule: ${ignoreRule.id} — ${ignoreRule.reason}`,
-        matchedOn: null,
-        borrowingsRelevant: false,
-        ignored: true,
-        ignoreRuleId: ignoreRule.id,
-        ignoreReason: ignoreRule.reason,
-        ignoreCategory: ignoreRule.category,
-      };
+
+    // ── Step 1: Product Type Primary ──────────────────────────────────────────
+
+    if (row.rawPrdType) {
+      // 1a/1b: Check curated exclusion masters first (Investments, Forex)
+      const exclusionRule = checkProductTypeMasterIgnore(row.rawPrdType);
+      if (exclusionRule) {
+        return {
+          ...row,
+          mappedGrouping: null,
+          mappedProductType: null,
+          mappedInstrumentName: null,
+          mappedFlowCode: null,
+          mappedFlowCategoryDesc: null,
+          mappingStatus: 'IGNORED_EXPLICIT' as MappingStatus,
+          mappingConfidence: 'high' as const,
+          mappingReason: `Prd Type "${row.rawPrdType}" belongs to ${exclusionRule.category} grouping — ${exclusionRule.reason}`,
+          matchedOn: 'prdType',
+          classificationStage: 'PRODUCT_TYPE_PRIMARY' as ClassificationStage,
+          classificationRuleApplied: (exclusionRule.category === 'INVESTMENTS'
+            ? 'INVESTMENT_PRODUCT_TYPE_MATCH'
+            : 'FOREX_PRODUCT_TYPE_MATCH') as ClassificationRuleApplied,
+          borrowingsRelevant: false,
+          ignored: true,
+          ignoreRuleId: exclusionRule.id,
+          ignoreReason: exclusionRule.reason,
+          ignoreCategory: exclusionRule.category,
+        };
+      }
+
+      // 1c: Check curated Borrowings master
+      if (BORROWINGS_PRODUCT_TYPE_CODES.has(row.rawPrdType.trim())) {
+        return {
+          ...row,
+          mappedGrouping: 'Borrowings',
+          mappedProductType: row.rawPrdType,
+          mappedInstrumentName: row.rawPrdTypeDesc || null,
+          mappedFlowCode: null,
+          mappedFlowCategoryDesc: null,
+          mappingStatus: 'MAPPED_BORROWINGS' as MappingStatus,
+          mappingConfidence: 'high' as const,
+          mappingReason: `Prd Type "${row.rawPrdType}" matched Borrowings product master`,
+          matchedOn: 'prdType',
+          classificationStage: 'PRODUCT_TYPE_PRIMARY' as ClassificationStage,
+          classificationRuleApplied: 'BORROWINGS_PRODUCT_TYPE_MATCH' as ClassificationRuleApplied,
+          borrowingsRelevant: true,
+          ignored: false,
+          ignoreRuleId: null,
+          ignoreReason: null,
+          ignoreCategory: null,
+        };
+      }
+
+      // 1d: Check Data Foundation product type master
+      const masterEntry = lookupProductTypeMaster(row.rawPrdType, productTypeMaster);
+      if (masterEntry) {
+        const isBorrowings = masterEntry.normGrouping === 'borrowings';
+        const status: MappingStatus = isBorrowings ? 'MAPPED_BORROWINGS' : 'MAPPED_NON_BORROWINGS';
+        return {
+          ...row,
+          mappedGrouping: masterEntry.rawGrouping,
+          mappedProductType: masterEntry.rawProductType,
+          mappedInstrumentName: masterEntry.rawInstrumentName,
+          mappedFlowCode: null,
+          mappedFlowCategoryDesc: null,
+          mappingStatus: status,
+          mappingConfidence: 'high' as const,
+          mappingReason: `Prd Type "${row.rawPrdType}" matched Data Foundation product master — Grouping: "${masterEntry.rawGrouping}" (row ${masterEntry.sourceRowNumber})`,
+          matchedOn: 'prdType',
+          classificationStage: 'PRODUCT_TYPE_PRIMARY' as ClassificationStage,
+          classificationRuleApplied: (isBorrowings
+            ? 'BORROWINGS_DATA_FOUNDATION_MATCH'
+            : 'NON_BORROWINGS_DATA_FOUNDATION_MATCH') as ClassificationRuleApplied,
+          borrowingsRelevant: isBorrowings,
+          ignored: false,
+          ignoreRuleId: null,
+          ignoreReason: null,
+          ignoreCategory: null,
+        };
+      }
+
+      // Prd Type is present but not in any master — fall through to fallback
     }
 
-    // 2. Check zero-amount sentinel
+    // ── Step 2: Zero-amount sentinel ──────────────────────────────────────────
+
     if (
       row.parsedAmtInPc === 0 &&
       !row.rawUpdateType &&
@@ -587,8 +649,10 @@ function stageD_classify(
         mappedFlowCategoryDesc: null,
         mappingStatus: 'IGNORED_EXPLICIT' as MappingStatus,
         mappingConfidence: 'none' as const,
-        mappingReason: `Matched ignore rule: ${ZERO_AMOUNT_RULE.id} — ${ZERO_AMOUNT_RULE.reason}`,
+        mappingReason: ZERO_AMOUNT_RULE.reason,
         matchedOn: null,
+        classificationStage: 'ZERO_AMOUNT' as ClassificationStage,
+        classificationRuleApplied: 'ZERO_AMOUNT_EXCLUSION' as ClassificationRuleApplied,
         borrowingsRelevant: false,
         ignored: true,
         ignoreRuleId: ZERO_AMOUNT_RULE.id,
@@ -597,12 +661,11 @@ function stageD_classify(
       };
     }
 
-    // 3. Check for insufficient data
+    // ── Step 3: Insufficient data ─────────────────────────────────────────────
+
     const hasAnyIdentifier = !!(
-      row.rawUpdateType ||
-      row.rawPrdType ||
-      row.rawPrdTypeDesc ||
-      row.rawPortfolioName
+      row.rawUpdateType || row.rawPrdType ||
+      row.rawPrdTypeDesc || row.rawPortfolioName
     );
     if (!hasAnyIdentifier) {
       return {
@@ -614,8 +677,10 @@ function stageD_classify(
         mappedFlowCategoryDesc: null,
         mappingStatus: 'INSUFFICIENT_DATA' as MappingStatus,
         mappingConfidence: 'none' as const,
-        mappingReason: 'No identifiable update type, product type, or portfolio name present',
+        mappingReason: 'No identifiable product type, update type, or portfolio name present',
         matchedOn: null,
+        classificationStage: 'INSUFFICIENT_DATA' as ClassificationStage,
+        classificationRuleApplied: 'INSUFFICIENT_DATA' as ClassificationRuleApplied,
         borrowingsRelevant: false,
         ignored: false,
         ignoreRuleId: null,
@@ -624,42 +689,44 @@ function stageD_classify(
       };
     }
 
-    // 4. Attempt match against Data Foundation
-    const { matchedEntry, matchedOn, confidence } = matchToMapping(row, normalizedDF);
+    // ── Step 4: Fallback evidence (Prd Type absent or unknown) ────────────────
 
-    if (matchedEntry) {
-      const grouping = matchedEntry.rawGrouping; // raw grouping value, never rewritten
-      const isBorrowings = matchedEntry.normGrouping === 'borrowings';
-      const status: MappingStatus = isBorrowings ? 'MAPPED_BORROWINGS' : 'MAPPED_NON_BORROWINGS';
+    const fallbackRule = checkFallbackIgnore(
+      row.rawUpdateType,
+      row.rawPrdTypeDesc,
+      row.rawUpdateTypeDesc,
+    );
+
+    if (fallbackRule) {
+      const ruleApplied: ClassificationRuleApplied = fallbackRule.category === 'INVESTMENTS'
+        ? 'INVESTMENT_UPDATE_OR_DESC_MATCH'
+        : fallbackRule.category === 'FOREX'
+          ? 'FOREX_UPDATE_OR_DESC_MATCH'
+          : 'NO_SIGNAL';
 
       return {
         ...row,
-        mappedGrouping:       grouping,
-        mappedProductType:    matchedEntry.rawProductType,
-        mappedInstrumentName: matchedEntry.rawInstrumentName,
-        mappedFlowCode:       matchedEntry.rawFlowCode,
-        mappedFlowCategoryDesc: matchedEntry.rawFlowCategoryDesc,
-        mappingStatus:        status,
-        mappingConfidence:    confidence,
-        mappingReason:        `Matched via ${matchedOn} against Data Foundation row ${matchedEntry.sourceRowNumber}. Grouping: "${grouping}"`,
-        matchedOn,
-        borrowingsRelevant:   isBorrowings,
-        ignored: false,
-        ignoreRuleId: null,
-        ignoreReason: null,
-        ignoreCategory: null,
+        mappedGrouping: null,
+        mappedProductType: null,
+        mappedInstrumentName: null,
+        mappedFlowCode: null,
+        mappedFlowCategoryDesc: null,
+        mappingStatus: 'IGNORED_EXPLICIT' as MappingStatus,
+        mappingConfidence: 'medium' as const,
+        mappingReason: `Prd Type absent/unknown. Fallback: ${fallbackRule.reason}`,
+        matchedOn: 'fallback',
+        classificationStage: 'FALLBACK_EVIDENCE' as ClassificationStage,
+        classificationRuleApplied: ruleApplied,
+        borrowingsRelevant: false,
+        ignored: true,
+        ignoreRuleId: fallbackRule.id,
+        ignoreReason: fallbackRule.reason,
+        ignoreCategory: fallbackRule.category,
       };
     }
 
-    // 5. No match — check borrowings relevance heuristic
-    const relevant = isBorrowingsRelevant(row);
-
-    // Also check if the raw updateTypeCode is known to be a borrowings code
-    const updateTypeIsBorrowings = row.rawUpdateType
-      ? borrowingsUpdateTypeCodes.has(row.rawUpdateType)
-      : false;
-
-    const borrowingsHint = relevant || updateTypeIsBorrowings;
+    // Fallback: check if row has borrowings-relevance signals → UNMAPPED_REVIEW
+    const borrowingsHint = isBorrowingsRelevant(row);
 
     return {
       ...row,
@@ -671,12 +738,13 @@ function stageD_classify(
       mappingStatus: 'UNMAPPED_REVIEW' as MappingStatus,
       mappingConfidence: 'none' as const,
       mappingReason: borrowingsHint
-        ? `No match in Data Foundation. Borrowings-relevance heuristic triggered on: ${[
-            relevant ? 'product/portfolio keywords' : '',
-            updateTypeIsBorrowings ? 'updateTypeCode matches known borrowings code' : '',
-          ].filter(Boolean).join(', ')}`
-        : `No match in Data Foundation. Insufficient signals to classify grouping.`,
+        ? `Prd Type "${row.rawPrdType || '(absent)'}" not in any product master. Borrowings-relevance keywords found in product/portfolio fields.`
+        : `Prd Type "${row.rawPrdType || '(absent)'}" not in any product master. Insufficient signals to classify grouping.`,
       matchedOn: null,
+      classificationStage: 'FALLBACK_EVIDENCE' as ClassificationStage,
+      classificationRuleApplied: borrowingsHint
+        ? 'BORROWINGS_FALLBACK_SIGNAL' as ClassificationRuleApplied
+        : 'NO_SIGNAL' as ClassificationRuleApplied,
       borrowingsRelevant: borrowingsHint,
       ignored: false,
       ignoreRuleId: null,
@@ -699,34 +767,76 @@ function stageE_assemble(
   dfNorm: DataFoundationNormalizedRow[],
   cfRaw: CashflowRawRow[],
   cfNorm: CashflowNormalizedRow[],
+  productTypeMaster: ProductTypeMasterEntry[],
   borrowingsRef: BorrowingsMappingEntry[],
   classified: ClassifiedCashflowRow[],
 ): WorkbookSession {
-  const borrowingsRows      = classified.filter(r => r.mappingStatus === 'MAPPED_BORROWINGS');
-  const nonBorrowingsRows   = classified.filter(r => r.mappingStatus === 'MAPPED_NON_BORROWINGS');
-  const unmappedReviewRows  = classified.filter(r => r.mappingStatus === 'UNMAPPED_REVIEW');
-  const ignoredRows         = classified.filter(r => r.mappingStatus === 'IGNORED_EXPLICIT');
-  const insufficientDataRows = classified.filter(r => r.mappingStatus === 'INSUFFICIENT_DATA');
+  const borrowingsCandidateRows = classified.filter(r => r.mappingStatus === 'MAPPED_BORROWINGS');
+  const finalBorrowingsRows     = borrowingsCandidateRows; // alias — same at this phase
+  const nonBorrowingsRows       = classified.filter(r => r.mappingStatus === 'MAPPED_NON_BORROWINGS');
+  const unmappedReviewRows      = classified.filter(r => r.mappingStatus === 'UNMAPPED_REVIEW');
+  const ignoredRows             = classified.filter(r => r.mappingStatus === 'IGNORED_EXPLICIT');
+  const insufficientDataRows    = classified.filter(r => r.mappingStatus === 'INSUFFICIENT_DATA');
 
+  // ── Validation assertions ────────────────────────────────────────────────
+  const assertionFailures: string[] = [];
+
+  // Assertion 1: No Investment product type in finalBorrowingsRows
+  const investmentInBorrowings = finalBorrowingsRows.filter(
+    r => r.ignoreCategory === 'INVESTMENTS',
+  );
+  if (investmentInBorrowings.length > 0) {
+    assertionFailures.push(
+      `ASSERTION_FAIL: ${investmentInBorrowings.length} row(s) with INVESTMENTS ignoreCategory found in finalBorrowingsRows`,
+    );
+  }
+
+  // Assertion 2: No Forex product type in finalBorrowingsRows
+  const forexInBorrowings = finalBorrowingsRows.filter(
+    r => r.ignoreCategory === 'FOREX',
+  );
+  if (forexInBorrowings.length > 0) {
+    assertionFailures.push(
+      `ASSERTION_FAIL: ${forexInBorrowings.length} row(s) with FOREX ignoreCategory found in finalBorrowingsRows`,
+    );
+  }
+
+  // Assertion 3: Unknown product type rows should not be auto-mapped to Borrowings
+  const unknownAutoMapped = finalBorrowingsRows.filter(
+    r => r.classificationStage !== 'PRODUCT_TYPE_PRIMARY',
+  );
+  if (unknownAutoMapped.length > 0) {
+    assertionFailures.push(
+      `ASSERTION_FAIL: ${unknownAutoMapped.length} row(s) in finalBorrowingsRows were not classified via PRODUCT_TYPE_PRIMARY stage`,
+    );
+  }
+
+  // ── Summary ──────────────────────────────────────────────────────────────
   const uniqueBorrowingsUpdateTypes = [
-    ...new Set(borrowingsRows.map(r => r.rawUpdateType).filter(Boolean)),
+    ...new Set(finalBorrowingsRows.map(r => r.rawUpdateType).filter(Boolean)),
   ].sort();
 
   const uniqueUnmappedUpdateTypes = [
     ...new Set(unmappedReviewRows.map(r => r.rawUpdateType).filter(Boolean)),
   ].sort();
 
+  const totalIgnoredForexRows = ignoredRows.filter(r => r.ignoreCategory === 'FOREX').length;
+  const totalIgnoredInvestmentRows = ignoredRows.filter(r => r.ignoreCategory === 'INVESTMENTS').length;
+
   const parseSummary: ParseSummary = {
     totalDataFoundationRows:      dfRaw.length,
     totalCashflowRows:            cfRaw.length,
-    totalMappedBorrowingsRows:    borrowingsRows.length,
+    totalMappedBorrowingsRows:    finalBorrowingsRows.length,
     totalMappedNonBorrowingsRows: nonBorrowingsRows.length,
     totalUnmappedReviewRows:      unmappedReviewRows.length,
     totalIgnoredRows:             ignoredRows.length,
+    totalIgnoredForexRows,
+    totalIgnoredInvestmentRows,
     totalInsufficientDataRows:    insufficientDataRows.length,
     uniqueBorrowingsUpdateTypes,
     uniqueUnmappedUpdateTypes,
     parseWarningsCount:           warnings.length,
+    validationAssertionFailures:  assertionFailures,
   };
 
   const rawWorkbookMeta: RawWorkbookMeta = {
@@ -734,9 +844,9 @@ function stageE_assemble(
     fileSize:      file.size,
     uploadedAt:    new Date().toISOString(),
     sheetNames,
-    workbookValid: errors.length === 0,
-    parseStatus:   errors.length > 0 ? 'failed' : warnings.length > 0 ? 'partial' : 'success',
-    parseErrors:   errors,
+    workbookValid: errors.length === 0 && assertionFailures.length === 0,
+    parseStatus:   errors.length > 0 ? 'failed' : (warnings.length > 0 || assertionFailures.length > 0) ? 'partial' : 'success',
+    parseErrors:   [...errors, ...assertionFailures],
     parseWarnings: warnings,
   };
 
@@ -746,9 +856,12 @@ function stageE_assemble(
     dataFoundationNormalizedRows: dfNorm,
     cashflowRawRows:              cfRaw,
     cashflowNormalizedRows:       cfNorm,
+    productTypeMaster,
     borrowingsMappingReference:   borrowingsRef,
     classifiedCashflowRows:       classified,
-    borrowingsRows,
+    borrowingsCandidateRows,
+    finalBorrowingsRows,
+    borrowingsRows:               finalBorrowingsRows, // backwards compat
     nonBorrowingsRows,
     unmappedReviewRows,
     ignoredRows,
@@ -787,15 +900,16 @@ export async function parseWorkbook(file: File): Promise<ParseWorkbookResult> {
     warnings.push('TCL Cashflow: no data rows found after header');
   }
 
-  // Stage D — Classification
+  // Stage D — Classification (product-type-first)
+  const productTypeMaster = buildProductTypeMaster(dfNorm);
   const borrowingsRef = buildBorrowingsMappingReference(dfNorm);
-  const classified = stageD_classify(cfNorm, dfNorm, borrowingsRef);
+  const classified = stageD_classify(cfNorm, productTypeMaster);
 
   // Stage E — Assemble
   const session = stageE_assemble(
     file, sheetNames, errors, warnings,
     dfRaw, dfNorm, cfRaw, cfNorm,
-    borrowingsRef, classified,
+    productTypeMaster, borrowingsRef, classified,
   );
 
   return { success: true, session };

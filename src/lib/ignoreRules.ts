@@ -1,19 +1,20 @@
 /**
- * Ignore rules engine for Treasury Intelligence workbook parsing.
+ * ignoreRules.ts — Product type masters and fallback ignore rules
  *
- * Three clean ignore categories:
- *   FOREX       — FX loans, derivatives, swaps, forwards
- *   VALUATION   — mark-to-market / accounting adjustment entries
- *   ZERO_AMOUNT — placeholder rows with no financial value
- *   INVESTMENTS — (reserved for future phase)
- *   OTHER       — catch-all for any additional exclusions
+ * Classification is driven PRIMARILY by Prd Type against product type masters.
+ * Fallback rules (UpdateType / desc keywords) are used ONLY when Prd Type
+ * is missing, not found, or ambiguous.
  *
- * Matching priority per row (all using RAW values only):
- *   1. Prd Type code in FOREX_PRODUCT_TYPES        → FOREX
- *   2. UpdateType code in FOREX_UPDATE_TYPES        → FOREX
- *   3. Update Type Desc keyword in FOREX_DESC_KEYWORDS → FOREX
- *   4. Prd Type Desc substring "valuation"          → VALUATION
- *   5. Zero-amount sentinel (programmatic)          → ZERO_AMOUNT
+ * Product Type Masters:
+ *   BORROWINGS_PRODUCT_TYPE_CODES — rows to include as Borrowings candidates
+ *   INVESTMENTS_PRODUCT_TYPE_CODES — rows to ignore as Investments
+ *   FOREX_PRODUCT_TYPE_CODES — rows to ignore as Forex
+ *
+ * Fallback (secondary evidence only, used when Prd Type is unknown):
+ *   FOREX_UPDATE_TYPE_CODES — UpdateType codes signalling Forex activity
+ *   FOREX_DESC_KEYWORDS — UpdateType Desc keywords signalling Forex activity
+ *   INVESTMENTS_UPDATE_TYPE_CODES — UpdateType codes signalling Investments
+ *   INVESTMENTS_DESC_KEYWORDS — UpdateType Desc keywords signalling Investments
  *
  * Raw business values are NEVER modified during matching.
  */
@@ -24,20 +25,60 @@ export interface IgnoreRule {
   id: string;
   category: IgnoreCategory;
   reason: string;
-  // Matching fields — all optional; only defined fields are checked
-  updateTypeCode?: string;        // exact match on rawUpdateType
-  productTypeCode?: string;       // exact match on rawPrdType
-  productTypeDesc?: string;       // substring match on rawPrdTypeDesc (case-insensitive)
-  updateTypeDescKeyword?: string; // substring match on rawUpdateTypeDesc (case-insensitive)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Forex — product type codes
+// Product Type Masters — primary grouping classifiers
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Prd Type codes that identify Forex / derivative instruments.
- * If a cashflow row's rawPrdType matches any of these, it is Forex-ignored.
+ * Prd Type codes that belong to the Borrowings grouping.
+ * Rows matching these are Borrowings candidates — never excluded by this check.
+ * Extensible: add codes here as new product types are onboarded.
+ */
+export const BORROWINGS_PRODUCT_TYPE_CODES = new Set<string>([
+  // Money Market / Inter-corporate
+  'ICD',    // Inter-Corporate Deposits (borrowing leg)
+  // Term Loans
+  'TL',     // Term Loans
+  // Non-Convertible Debentures
+  'NCD',
+  // Commercial Paper
+  'CP',
+  // Cash Credit / Overdraft
+  'CC',
+  'OD',
+  // Working Capital Demand Loan
+  'WCDL',
+  // Bill Discounting
+  'BD',
+  // Bank Guarantee / Letter of Credit
+  'BG',
+  'LC',
+  // TREPS / Tri-party repos
+  'TREP',
+  // Bonds (borrowing)
+  'BON',
+]);
+
+/**
+ * Prd Type codes that belong to the Investments grouping.
+ * Rows matching these go to IGNORED_EXPLICIT (INVESTMENTS).
+ * Extensible: add codes here as new investment product types are identified.
+ */
+export const INVESTMENTS_PRODUCT_TYPE_CODES = new Set<string>([
+  '23A',  // Fixed Deposits
+  '23B',  // ICD (Investment leg)
+  '21A',  // Mutual Funds
+  '21B',  // Mutual Funds - Dividend Reinvestment
+  '22A',  // Govt Securities
+  '22B',  // Corporate Bonds (investment)
+  '22C',  // T-Bill
+]);
+
+/**
+ * Prd Type codes that belong to the Forex / derivatives grouping.
+ * Rows matching these go to IGNORED_EXPLICIT (FOREX).
  */
 export const FOREX_PRODUCT_TYPE_CODES = new Set<string>([
   '10L',  // FX Loans: ECB
@@ -47,12 +88,12 @@ export const FOREX_PRODUCT_TYPE_CODES = new Set<string>([
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Forex — update type codes
+// Fallback — Forex (used only when Prd Type is missing / unknown)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * UpdateType codes that belong to Forex / derivative activity.
- * If a cashflow row's rawUpdateType matches any of these, it is Forex-ignored.
+ * UpdateType codes that indicate Forex / derivative activity.
+ * Used ONLY when rawPrdType is absent or not found in any product master.
  */
 export const FOREX_UPDATE_TYPE_CODES = new Set<string>([
   'AD1000', 'AD1001', 'AD1018', 'AD1020', 'AD1021', 'AD1022', 'AD1023',
@@ -82,25 +123,18 @@ export const FOREX_UPDATE_TYPE_CODES = new Set<string>([
   'VR500_OC', 'VR501_OC',
 ]);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Forex — update type description keywords
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Keywords found in rawUpdateTypeDesc that clearly indicate Forex / derivative
- * activity. Used when Prd Type or Prd Type Desc is absent from Data Foundation.
- * Rows matching any keyword go directly to IGNORED_EXPLICIT (FOREX) — never
- * left in UNMAPPED_REVIEW.
+ * UpdateType Desc keywords indicating Forex / derivative activity.
+ * Used ONLY as fallback when Prd Type is unknown.
  */
 export const FOREX_DESC_KEYWORDS: string[] = [
   'ccs',
   'irs',
   'open otc',
   'nominal amount',
-  'accrual',
   'swap',
   'forward',
-  ' fx ',     // padded to avoid matching "fx" inside other words
+  ' fx ',
   'forex',
   'cross-currency',
   'cross currency',
@@ -108,31 +142,64 @@ export const FOREX_DESC_KEYWORDS: string[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Programmatic rule objects (for audit trail on ignored rows)
+// Fallback — Investments (used only when Prd Type is missing / unknown)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * UpdateType codes that indicate Investments activity.
+ * Used ONLY when rawPrdType is absent or not found in any product master.
+ * Extend this list as new investment update types are identified.
+ */
+export const INVESTMENTS_UPDATE_TYPE_CODES = new Set<string>([
+  // Add investment-specific update type codes here as identified
+]);
+
+/**
+ * UpdateType Desc keywords indicating Investments activity.
+ * Used ONLY as fallback when Prd Type is unknown.
+ */
+export const INVESTMENTS_DESC_KEYWORDS: string[] = [
+  'fixed deposit',
+  'mutual fund',
+  'govt security',
+  'government security',
+  't-bill',
+  'treasury bill',
+  'corporate bond',
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canonical rule objects — stored on each ignored row for audit trail
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const INVESTMENT_PRODUCT_TYPE_RULE: IgnoreRule = {
+  id: 'IGNORE_INVESTMENT_PRODUCT_TYPE',
+  category: 'INVESTMENTS',
+  reason: 'Product type code belongs to Investments grouping',
+};
+
+export const INVESTMENT_FALLBACK_RULE: IgnoreRule = {
+  id: 'IGNORE_INVESTMENT_FALLBACK',
+  category: 'INVESTMENTS',
+  reason: 'Prd Type unknown; fallback evidence (UpdateType or desc) indicates Investments activity',
+};
 
 export const FOREX_PRODUCT_TYPE_RULE: IgnoreRule = {
   id: 'IGNORE_FOREX_PRODUCT_TYPE',
   category: 'FOREX',
-  reason: 'Product type code identifies this as a Forex / derivative instrument',
+  reason: 'Product type code belongs to Forex / derivatives grouping',
 };
 
-export const FOREX_UPDATE_TYPE_RULE: IgnoreRule = {
-  id: 'IGNORE_FOREX_UPDATE_TYPE',
+export const FOREX_FALLBACK_RULE: IgnoreRule = {
+  id: 'IGNORE_FOREX_FALLBACK',
   category: 'FOREX',
-  reason: 'Update type code belongs to Forex / derivative activity',
-};
-
-export const FOREX_DESC_KEYWORD_RULE: IgnoreRule = {
-  id: 'IGNORE_FOREX_DESC_KEYWORD',
-  category: 'FOREX',
-  reason: 'Update Type Desc contains keyword indicating Forex / derivative activity',
+  reason: 'Prd Type unknown; fallback evidence (UpdateType or desc) indicates Forex / derivative activity',
 };
 
 export const VALUATION_RULE: IgnoreRule = {
   id: 'IGNORE_VALUATION',
   category: 'VALUATION',
-  reason: 'Valuation / mark-to-market adjustment — accounting entry, not a principal cashflow',
+  reason: 'Prd Type Desc contains "valuation" — mark-to-market accounting entry, not a principal cashflow',
 };
 
 export const ZERO_AMOUNT_RULE: IgnoreRule = {
@@ -142,49 +209,77 @@ export const ZERO_AMOUNT_RULE: IgnoreRule = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Main matching function
+// Primary product-type-based ignore check
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Check whether a cashflow row matches any ignore rule.
- * Returns the matching IgnoreRule or null.
+ * Check rawPrdType against Investments and Forex product masters.
+ * Returns the applicable ignore rule, or null if not an exclusion type.
  *
- * Priority:
- *   1. Forex prd type code
- *   2. Forex update type code
- *   3. Forex update type desc keyword
- *   4. Valuation prd type desc keyword
+ * Called FIRST in the classifier — before any fallback checks.
+ * Uses rawPrdType only (exact match, trimmed).
+ */
+export function checkProductTypeMasterIgnore(rawPrdType: string): IgnoreRule | null {
+  const code = rawPrdType.trim();
+  if (!code) return null;
+
+  if (INVESTMENTS_PRODUCT_TYPE_CODES.has(code)) return INVESTMENT_PRODUCT_TYPE_RULE;
+  if (FOREX_PRODUCT_TYPE_CODES.has(code)) return FOREX_PRODUCT_TYPE_RULE;
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fallback ignore check (used only when Prd Type is unknown)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * When rawPrdType is absent or not found in any product master, check secondary
+ * evidence to determine if the row clearly belongs to Investments or Forex.
  *
- * The ZERO_AMOUNT rule is applied separately in the classifier (programmatic).
+ * Matching order:
+ *   1. Investments update type code
+ *   2. Investments desc keyword
+ *   3. Forex update type code
+ *   4. Forex desc keyword
+ *   5. Valuation prd type desc keyword
+ *
+ * Returns the applicable ignore rule, or null if evidence is insufficient.
  * All matching uses RAW values only.
  */
-export function findMatchingIgnoreRule(
+export function checkFallbackIgnore(
   rawUpdateType: string,
-  rawPrdType: string,
   rawPrdTypeDesc: string,
   rawUpdateTypeDesc: string,
 ): IgnoreRule | null {
 
-  // 1. Forex — product type code
-  if (rawPrdType && FOREX_PRODUCT_TYPE_CODES.has(rawPrdType.trim())) {
-    return FOREX_PRODUCT_TYPE_RULE;
+  // 1. Investments — update type code
+  if (rawUpdateType && INVESTMENTS_UPDATE_TYPE_CODES.has(rawUpdateType.trim())) {
+    return INVESTMENT_FALLBACK_RULE;
   }
 
-  // 2. Forex — update type code
-  if (rawUpdateType && FOREX_UPDATE_TYPE_CODES.has(rawUpdateType.trim())) {
-    return FOREX_UPDATE_TYPE_RULE;
-  }
-
-  // 3. Forex — update type desc keyword
+  // 2. Investments — desc keyword
   if (rawUpdateTypeDesc) {
     const descLower = rawUpdateTypeDesc.toLowerCase();
-    const matched = FOREX_DESC_KEYWORDS.find(kw => descLower.includes(kw.toLowerCase()));
-    if (matched) {
-      return FOREX_DESC_KEYWORD_RULE;
+    if (INVESTMENTS_DESC_KEYWORDS.some(kw => descLower.includes(kw.toLowerCase()))) {
+      return INVESTMENT_FALLBACK_RULE;
     }
   }
 
-  // 4. Valuation — prd type desc keyword
+  // 3. Forex — update type code
+  if (rawUpdateType && FOREX_UPDATE_TYPE_CODES.has(rawUpdateType.trim())) {
+    return FOREX_FALLBACK_RULE;
+  }
+
+  // 4. Forex — desc keyword
+  if (rawUpdateTypeDesc) {
+    const descLower = rawUpdateTypeDesc.toLowerCase();
+    if (FOREX_DESC_KEYWORDS.some(kw => descLower.includes(kw.toLowerCase()))) {
+      return FOREX_FALLBACK_RULE;
+    }
+  }
+
+  // 5. Valuation — prd type desc keyword
   if (rawPrdTypeDesc && rawPrdTypeDesc.toLowerCase().includes('valuation')) {
     return VALUATION_RULE;
   }

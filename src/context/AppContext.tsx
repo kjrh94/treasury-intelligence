@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import type { AppState, AppPage, BorrowingsTab, MainModule, UploadedFile } from '../types';
+import type { AppState, AppPage, BorrowingsTab, MainModule, UploadedFile, ParsedData } from '../types';
+import type { WorkbookSession } from '../types/workbook';
 
 interface AppContextType extends AppState {
   navigateTo: (page: AppPage) => void;
@@ -7,6 +8,12 @@ interface AppContextType extends AppState {
   setActiveModule: (module: MainModule) => void;
   setActiveBorrowingsTab: (tab: BorrowingsTab) => void;
   setPeriod: (period: string) => void;
+  // Legacy chart data (used by existing tabs, fed from mock until borrowings logic is wired)
+  parsedData: ParsedData | null;
+  setParsedData: (data: ParsedData) => void;
+  // Workbook session — the full trustworthy parsed output from this phase
+  workbookSession: WorkbookSession | null;
+  setWorkbookSession: (session: WorkbookSession) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -19,6 +26,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     activeBorrowingsTab: 'portfolio',
     period: 'Monthly',
   });
+
+  const [parsedData, setParsedDataState] = useState<ParsedData | null>(null);
+  const [workbookSession, setWorkbookSessionState] = useState<WorkbookSession | null>(null);
 
   const navigateTo = useCallback((page: AppPage) => {
     setState(prev => ({ ...prev, page }));
@@ -41,6 +51,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, period }));
   }, []);
 
+  const setParsedData = useCallback((data: ParsedData) => {
+    setParsedDataState(data);
+  }, []);
+
+  const setWorkbookSession = useCallback((session: WorkbookSession) => {
+    setWorkbookSessionState(session);
+  }, []);
+
   return (
     <AppContext.Provider value={{
       ...state,
@@ -49,6 +67,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setActiveModule,
       setActiveBorrowingsTab,
       setPeriod,
+      parsedData,
+      setParsedData,
+      workbookSession,
+      setWorkbookSession,
     }}>
       {children}
     </AppContext.Provider>

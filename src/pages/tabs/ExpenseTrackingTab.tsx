@@ -7,18 +7,39 @@ import { ChartCard } from '../../components/ui/ChartCard';
 import { AiInsightStrip } from '../../components/ui/AiInsightStrip';
 import { SpotlightCard } from '../../components/ui/SpotlightCard';
 import { KpiCard } from '../../components/ui/KpiCard';
-import { costOfFundsData, feesOverTimeData, productRateData, productRateColors } from '../../data/mockData';
+import {
+  costOfFundsData as mockCostOfFunds,
+  feesOverTimeData as mockFees,
+  productRateData as mockProductRate,
+  productRateColors,
+} from '../../data/mockData';
+import { useApp } from '../../context/AppContext';
 
 // Cost of Funds Hero Chart
 function CostOfFundsHeroChart() {
+  const { parsedData } = useApp();
+  const data = parsedData?.costOfFundsData ?? mockCostOfFunds;
+
+  const currentValue = data[data.length - 1]?.value ?? 9.8;
+  const allValues = data.map(d => d.value).filter(v => v > 0);
+  const avgValue = allValues.length
+    ? (allValues.reduce((a, b) => a + b, 0) / allValues.length).toFixed(1)
+    : '9.1';
+  const trend = allValues.length >= 2 && allValues[allValues.length - 1] > allValues[0]
+    ? 'Rising'
+    : 'Stable';
+  const trendRising = trend === 'Rising';
+
   const summaryCards = [
-    { label: 'Current Quarter', value: '9.8%', color: 'text-slate-900' },
-    { label: '17-Quarter Average', value: '9.1%', color: 'text-slate-900' },
+    { label: 'Current Quarter', value: `${currentValue}%`, color: 'text-slate-900' },
+    { label: `${data.length}-Quarter Average`, value: `${avgValue}%`, color: 'text-slate-900' },
     {
       label: 'Trend',
-      value: 'Rising',
-      color: 'text-red-600',
-      icon: <TrendingUp size={13} className="text-red-500" />,
+      value: trend,
+      color: trendRising ? 'text-red-600' : 'text-emerald-600',
+      icon: trendRising
+        ? <TrendingUp size={13} className="text-red-500" />
+        : <TrendingDown size={13} className="text-emerald-500" />,
     },
   ];
 
@@ -34,19 +55,16 @@ function CostOfFundsHeroChart() {
           expanded={
             <div className="space-y-2">
               <p className="text-xs text-slate-700 leading-relaxed">
-                <span className="inline-flex items-center gap-1 text-blue-600 font-medium"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" /> Costs are rising:</span>{' '}
-                The Cost of Funds has increased from 8.2% in Q1 2025 to 9.8% in 2026 Q1 —
-                a 1.6 percentage point increase. This means each rupee borrowed is costing more in interest.
+                <span className="inline-flex items-center gap-1 text-blue-600 font-medium"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" /> Costs are {trendRising ? 'rising' : 'stable'}:</span>{' '}
+                The Cost of Funds is currently at{' '}<strong>{currentValue}%</strong>{' '}
+                with a {data.length}-quarter average of <strong>{avgValue}%</strong>.
+                {trendRising ? ' This means each rupee borrowed is costing more in interest.' : ''}
               </p>
               <p className="text-xs text-slate-700 leading-relaxed">
-                <span className="font-semibold">Range over the period:</span> Cost of Funds ranged from a
-                low of 8.2% (2025 Q1) to a high of 9.8% (2026 Q1). The current quarter is at the highest
-                point — worth investigating.
-              </p>
-              <p className="text-xs text-slate-700 leading-relaxed">
-                <span className="font-semibold">What to do next:</span> With costs trending up,
-                review your existing loan terms and consider locking in current rates before they
-                rise further. Negotiate with lenders for better terms on new facilities.
+                <span className="font-semibold">What to do next:</span>{' '}
+                {trendRising
+                  ? 'With costs trending up, review existing loan terms and consider locking in current rates before they rise further.'
+                  : 'Costs are well-managed. Continue monitoring quarterly for any emerging uptick.'}
               </p>
             </div>
           }
@@ -54,7 +72,7 @@ function CostOfFundsHeroChart() {
       }
     >
       <ResponsiveContainer width="100%" height={220}>
-        <LineChart data={costOfFundsData} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
+        <LineChart data={data} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
           <XAxis dataKey="quarter" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
           <YAxis
@@ -62,7 +80,7 @@ function CostOfFundsHeroChart() {
             axisLine={false}
             tickLine={false}
             tickFormatter={v => `${v}%`}
-            domain={[7, 11]}
+            domain={['auto', 'auto']}
           />
           <Tooltip
             content={({ active, payload, label }) => {
@@ -106,19 +124,28 @@ function CostOfFundsHeroChart() {
 
 // Small KPI Row
 function ExpenseKpis() {
+  const { parsedData } = useApp();
+  const kpis = parsedData?.expenseKpis;
+
+  const feesCr = kpis ? kpis.totalFeesCr : 204;
+  const feesLabel = feesCr >= 1000 ? `₹${(feesCr / 1000).toFixed(2)} Thousand Cr` : `₹${feesCr} Cr`;
+  const highestBank = kpis ? kpis.highestFeeBank : 'IDFC First Bank';
+  const highestFee = kpis ? kpis.highestFeeBankCr : 38.4;
+  const highestFeeLabel = highestFee >= 1000 ? `${(highestFee / 1000).toFixed(2)} Thousand Cr` : `${highestFee} Cr`;
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <KpiCard
         label="Total Fees Paid"
-        value="₹204 Cr"
+        value={feesLabel}
         subtext="Last 90 days"
         icon={<ReceiptText size={16} />}
         iconBg="bg-blue-50 text-blue-500"
       />
       <KpiCard
         label="Bank with Highest Fees"
-        value="IDFC First Bank"
-        subtext="₹38.4 Cr — current quarter"
+        value={highestBank}
+        subtext={`₹${highestFeeLabel} — current quarter`}
         icon={<Building2 size={16} />}
         iconBg="bg-amber-50 text-amber-500"
       />
@@ -139,20 +166,16 @@ function ExpenseSpotlight() {
         <div>
           <p className="text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Position</p>
           <p className="text-sm text-slate-700 leading-relaxed">
-            Your borrowing portfolio shows a wide interest rate spectrum ranging from <strong>7.85%</strong>{' '}
-            (Loan: ECB – INR) to <strong>12.25%</strong> (Tier II Debentures), reflecting a spread of{' '}
-            <strong>4.40 percentage points</strong>. The average borrowing cost across your product mix stands
-            at approximately <strong>10.27%</strong>. Quarter-on-quarter analysis indicates borrowing costs
-            are trending upward by approximately{' '}
-            <span className="text-red-600 font-semibold">5.3%</span>, likely influenced by monetary policy
-            tightening and credit market conditions.
+            Your borrowing portfolio reflects a wide interest rate spectrum across all active instruments.
+            Quarter-on-quarter analysis indicates borrowing costs are trending upward, likely influenced
+            by monetary policy conditions and credit market dynamics.
           </p>
         </div>
         <div>
           <p className="text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Recommendations</p>
           <ul className="space-y-2">
             {[
-              'Consider gradually replacing higher-cost instruments (Tier II Debentures at 12.25%) with lower-cost alternatives where structurally feasible, subject to prepayment terms.',
+              'Consider gradually replacing higher-cost instruments with lower-cost alternatives where structurally feasible, subject to prepayment terms.',
               'Rising rate environment warrants close monitoring of refinancing windows and potential lock-in opportunities on floating-rate exposures.',
               'Maintain quarterly rate benchmarking across all lender facilities to identify renegotiation opportunities.',
             ].map((rec, i) => (
@@ -170,6 +193,9 @@ function ExpenseSpotlight() {
 
 // Fees Over Time Chart
 function FeesOverTimeChart() {
+  const { parsedData } = useApp();
+  const data = parsedData?.feesOverTimeData ?? mockFees;
+
   return (
     <ChartCard
       title="Fees Over Time"
@@ -181,11 +207,11 @@ function FeesOverTimeChart() {
             <div className="space-y-1.5">
               <p className="text-xs text-slate-700 leading-relaxed">
                 <span className="inline-flex items-center gap-1 text-slate-800 font-medium"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" /> Fees are steady:</span>{' '}
-                Fees grew slightly by 5.2% from last quarter, which is normal for consistent borrowing activity.
+                Fee levels have remained within a consistent range across the observed quarters, reflecting stable borrowing activity.
               </p>
               <p className="text-xs text-slate-700 leading-relaxed">
                 <span className="inline-flex items-center gap-1 text-slate-800 font-medium"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" /> Spending in line:</span>{' '}
-                This quarter's fees are within the normal range of the 4-quarter average — your fee spending is predictable and well-managed.
+                This quarter's fees are within the normal range of the multi-quarter average — your fee spending is predictable and well-managed.
               </p>
             </div>
           }
@@ -201,7 +227,7 @@ function FeesOverTimeChart() {
       }
     >
       <ResponsiveContainer width="100%" height={200}>
-        <BarChart data={feesOverTimeData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
           <XAxis dataKey="quarter" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={v => `${v}`} />
@@ -219,8 +245,8 @@ function FeesOverTimeChart() {
             }}
           />
           <Bar dataKey="fees" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={36}>
-            {feesOverTimeData.map((_, i) => (
-              <Cell key={i} fill={i === feesOverTimeData.length - 1 ? '#2563eb' : '#93c5fd'} />
+            {data.map((_, i) => (
+              <Cell key={i} fill={i === data.length - 1 ? '#2563eb' : '#93c5fd'} />
             ))}
           </Bar>
         </BarChart>
@@ -231,22 +257,30 @@ function FeesOverTimeChart() {
 
 // Product-wise Interest Rate Chart (Scatter/Dot)
 function ProductRateChart() {
-  const products = Object.keys(productRateData[0]).filter(k => k !== 'quarter');
+  const { parsedData } = useApp();
+  const data = parsedData?.productRateData ?? mockProductRate;
+  const products = Object.keys(data[0] ?? {}).filter(k => k !== 'quarter');
 
   // Transform for ScatterChart — one series per product
   const scatterSeries = products.map((product, i) => ({
     product,
     color: productRateColors[i % productRateColors.length],
-    data: productRateData.map((d, qi) => ({
+    data: data.map((d, qi) => ({
       x: qi,
       y: d[product as keyof typeof d] as number,
       quarter: d.quarter,
     })),
   }));
 
+  const ratesFlat = scatterSeries.flatMap(s => s.data.map(d => d.y)).filter(v => v > 0);
+  const maxRate = ratesFlat.length ? Math.max(...ratesFlat) : 12.75;
+  const minRate = ratesFlat.length ? Math.min(...ratesFlat) : 7.85;
+  const maxProduct = scatterSeries.find(s => s.data.some(d => d.y === maxRate))?.product ?? 'N/A';
+  const minProduct = scatterSeries.find(s => s.data.some(d => d.y === minRate))?.product ?? 'N/A';
+
   const bottomCards = [
-    { label: 'Highest Rate', sublabel: 'Tier II Debentures', value: '12.75%', color: 'text-red-600', icon: <TrendingUp size={14} className="text-red-500" /> },
-    { label: 'Lowest Rate', sublabel: 'Loan: ECB – INR', value: '7.85%', color: 'text-emerald-600', icon: <TrendingDown size={14} className="text-emerald-500" /> },
+    { label: 'Highest Rate', sublabel: maxProduct, value: `${maxRate}%`, color: 'text-red-600', icon: <TrendingUp size={14} className="text-red-500" /> },
+    { label: 'Lowest Rate', sublabel: minProduct, value: `${minRate}%`, color: 'text-emerald-600', icon: <TrendingDown size={14} className="text-emerald-500" /> },
     { label: 'Rate Trend', sublabel: 'Across All Products', value: 'Rising', color: 'text-red-600', icon: <TrendingUp size={14} className="text-red-500" /> },
   ];
 
@@ -260,9 +294,9 @@ function ProductRateChart() {
           expanded={
             <div className="space-y-1.5">
               {[
-                { color: 'bg-red-500', label: 'Rates went up:', text: 'Interest rates increased by an average of 5.03% across your loans this quarter. Consider locking in current rates on existing loans and looking into replacing higher-rate ones.' },
-                { color: 'bg-amber-500', label: 'Big rate gap between products:', text: 'Tier II Debentures has the highest rate at 12.75%, while Loan: ECB - INR has the lowest at 7.85%. This 4.90% difference means you could save by shifting toward lower-rate loans.' },
-                { color: 'bg-blue-500', label: 'Rates keep climbing:', text: 'Multiple products have seen rates rise for 3 quarters in a row. Consider replacing these with cheaper options before rates rise further.' },
+                { color: 'bg-red-500', label: 'Rates went up:', text: `Interest rates are rising across your loans. Consider locking in current rates on existing loans and looking into replacing higher-rate ones.` },
+                { color: 'bg-amber-500', label: 'Big rate gap between products:', text: `${maxProduct} has the highest rate at ${maxRate}%, while ${minProduct} has the lowest at ${minRate}%. This ${(maxRate - minRate).toFixed(2)}% difference means you could save by shifting toward lower-rate loans.` },
+                { color: 'bg-blue-500', label: 'Action recommended:', text: 'Consider replacing higher-cost instruments with cheaper options before rates rise further.' },
               ].map(item => (
                 <p key={item.label} className="text-xs text-slate-700 leading-relaxed">
                   <span className="inline-flex items-center gap-1 font-medium"><span className={`w-1.5 h-1.5 rounded-full ${item.color} inline-block`} /> {item.label}</span>{' '}
@@ -278,7 +312,7 @@ function ProductRateChart() {
           {bottomCards.map(card => (
             <div key={card.label} className="text-center p-3 bg-slate-50 rounded-xl">
               <p className="text-xs text-slate-500 mb-0.5">{card.label}</p>
-              <p className="text-xs text-slate-400 mb-2">{card.sublabel}</p>
+              <p className="text-xs text-slate-400 mb-2 truncate">{card.sublabel}</p>
               <div className={`flex items-center justify-center gap-1 text-base font-bold ${card.color}`} style={{ fontWeight: 700 }}>
                 {card.icon}
                 {card.value}
@@ -299,9 +333,9 @@ function ProductRateChart() {
               tick={{ fontSize: 10, fill: '#64748b' }}
               axisLine={false}
               tickLine={false}
-              tickCount={5}
-              tickFormatter={i => productRateData[i]?.quarter ?? ''}
-              domain={[-0.5, 4.5]}
+              tickCount={data.length}
+              tickFormatter={i => data[i]?.quarter ?? ''}
+              domain={[-0.5, data.length - 0.5]}
               label={{ value: 'Quarter', position: 'insideBottom', offset: -10, fontSize: 10, fill: '#94a3b8' }}
             />
             <YAxis
@@ -311,7 +345,7 @@ function ProductRateChart() {
               axisLine={false}
               tickLine={false}
               tickFormatter={v => `${v}%`}
-              domain={[7, 14]}
+              domain={['auto', 'auto']}
               label={{ value: 'Interest Rate (%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: '#94a3b8' }}
             />
             <Tooltip

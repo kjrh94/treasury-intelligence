@@ -7,43 +7,52 @@ import { Clock, Calendar, CalendarDays, CalendarRange, ChevronLeft, ChevronRight
 import { SpotlightCard } from '../../components/ui/SpotlightCard';
 import { ChartCard } from '../../components/ui/ChartCard';
 import { AiInsightStrip } from '../../components/ui/AiInsightStrip';
-import { repaymentScheduleData } from '../../data/mockData';
+import { repaymentScheduleData as mockRepaymentSchedule } from '../../data/mockData';
+import { useApp } from '../../context/AppContext';
 
 type BucketKey = 'week' | 'month' | 'quarter' | 'year';
 
-const buckets: { key: BucketKey; label: string; value: string; subtext: string; icon: React.ReactNode }[] = [
-  {
-    key: 'week',
-    label: 'Due in 1 Week',
-    value: '₹3,314.42 Cr',
-    subtext: 'Next 7 days',
-    icon: <Clock size={15} />,
-  },
-  {
-    key: 'month',
-    label: 'Due in 1 Month',
-    value: '₹6,549.29 Cr',
-    subtext: 'Next 30 days',
-    icon: <Calendar size={15} />,
-  },
-  {
-    key: 'quarter',
-    label: 'Due in 1 Quarter',
-    value: '₹1.39 Thousand Cr',
-    subtext: 'Next 90 days',
-    icon: <CalendarDays size={15} />,
-  },
-  {
-    key: 'year',
-    label: 'Due in 1 Year',
-    value: '₹3.70 Thousand Cr',
-    subtext: 'Next 365 days',
-    icon: <CalendarRange size={15} />,
-  },
-];
+function fmtCr(n: number): string {
+  if (n >= 1000) return `₹${(n / 1000).toFixed(2)} Thousand Cr`;
+  return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Cr`;
+}
 
 // Repayment Bucket Cards
 function BucketCards({ active, setActive }: { active: BucketKey; setActive: (k: BucketKey) => void }) {
+  const { parsedData } = useApp();
+  const kpis = parsedData?.repaymentKpis;
+
+  const buckets: { key: BucketKey; label: string; value: string; subtext: string; icon: React.ReactNode }[] = [
+    {
+      key: 'week',
+      label: 'Due in 1 Week',
+      value: kpis ? fmtCr(kpis.dueWeekCr) : '₹3,314.42 Cr',
+      subtext: 'Next 7 days',
+      icon: <Clock size={15} />,
+    },
+    {
+      key: 'month',
+      label: 'Due in 1 Month',
+      value: kpis ? fmtCr(kpis.dueMonthCr) : '₹6,549.29 Cr',
+      subtext: 'Next 30 days',
+      icon: <Calendar size={15} />,
+    },
+    {
+      key: 'quarter',
+      label: 'Due in 1 Quarter',
+      value: kpis ? fmtCr(kpis.dueQuarterCr) : '₹1.39 Thousand Cr',
+      subtext: 'Next 90 days',
+      icon: <CalendarDays size={15} />,
+    },
+    {
+      key: 'year',
+      label: 'Due in 1 Year',
+      value: kpis ? fmtCr(kpis.dueYearCr) : '₹3.70 Thousand Cr',
+      subtext: 'Next 365 days',
+      icon: <CalendarRange size={15} />,
+    },
+  ];
+
   const iconBgs: Record<BucketKey, string> = {
     week: 'bg-red-50 text-red-500',
     month: 'bg-amber-50 text-amber-500',
@@ -83,11 +92,17 @@ function BucketCards({ active, setActive }: { active: BucketKey; setActive: (k: 
 
 // Repayments Spotlight
 function RepaymentsSpotlight() {
+  const { parsedData } = useApp();
+  const kpis = parsedData?.repaymentKpis;
+
+  const quarterCr = kpis?.dueQuarterCr ?? 1390;
+  const lcr = kpis?.liquidityCoverageRatio ?? 4.19;
+
   const summaryRows = [
-    { label: '1 Week', value: '₹3,314.42 Cr' },
-    { label: '1 Month', value: '₹6,549.29 Cr' },
-    { label: '1 Quarter', value: '₹1.39 Thousand Cr' },
-    { label: '1 Year', value: '₹3.70 Thousand Cr' },
+    { label: '1 Week',    value: kpis ? fmtCr(kpis.dueWeekCr)    : '₹3,314.42 Cr' },
+    { label: '1 Month',   value: kpis ? fmtCr(kpis.dueMonthCr)   : '₹6,549.29 Cr' },
+    { label: '1 Quarter', value: kpis ? fmtCr(kpis.dueQuarterCr) : '₹1.39 Thousand Cr' },
+    { label: '1 Year',    value: kpis ? fmtCr(kpis.dueYearCr)    : '₹3.70 Thousand Cr' },
   ];
 
   return (
@@ -102,12 +117,12 @@ function RepaymentsSpotlight() {
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white rounded-xl p-4 border border-blue-100">
             <p className="text-xs text-slate-500 mb-1">90-Day Repayments</p>
-            <p className="text-lg font-bold text-slate-900" style={{ fontWeight: 700 }}>₹1.39 Thousand Cr</p>
+            <p className="text-lg font-bold text-slate-900" style={{ fontWeight: 700 }}>{fmtCr(quarterCr)}</p>
             <p className="text-xs text-slate-400 mt-0.5">Normal distribution</p>
           </div>
           <div className="bg-white rounded-xl p-4 border border-blue-100">
             <p className="text-xs text-slate-500 mb-1">Liquidity Coverage</p>
-            <p className="text-lg font-bold text-emerald-600" style={{ fontWeight: 700 }}>4.19x</p>
+            <p className="text-lg font-bold text-emerald-600" style={{ fontWeight: 700 }}>{lcr}x</p>
             <p className="text-xs text-slate-400 mt-0.5">Minimum: 1.2x</p>
           </div>
         </div>
@@ -126,9 +141,9 @@ function RepaymentsSpotlight() {
         <div>
           <p className="text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Position</p>
           <p className="text-sm text-slate-700 leading-relaxed">
-            Upcoming repayments of <strong>₹1.39 Thousand Cr</strong> over the next 90 days represent{' '}
-            <strong>0.5%</strong> of total cash inflow. Liquidity coverage ratio stands at{' '}
-            <span className="text-emerald-600 font-semibold">4.19x</span> against policy minimum of 1.2x,
+            Upcoming repayments of <strong>{fmtCr(quarterCr)}</strong> over the next 90 days.{' '}
+            Liquidity coverage ratio stands at{' '}
+            <span className="text-emerald-600 font-semibold">{lcr}x</span> against policy minimum of 1.2x,
             providing adequate buffer for repayment obligations.
           </p>
         </div>
@@ -138,8 +153,8 @@ function RepaymentsSpotlight() {
           <p className="text-xs font-semibold text-slate-700 mb-3 uppercase tracking-wide">Actionable Recommendations</p>
           <ul className="space-y-3">
             {[
-              { icon: <span className="text-amber-500">→</span>, text: 'Consider selective prepayment of ₹6,549.29 Cr in high-interest obligations (>10% APR) when liquidity permits, saving approximately ₹294.68 Cr in interest costs annually.' },
-              { icon: <span className="text-blue-500">↔</span>, text: 'Hedge interest rate exposure on ₹2.22 Thousand Cr of floating-rate debt using interest rate swaps or caps to protect against rate increases (current weighted avg: ~8.5%).' },
+              { icon: <span className="text-amber-500">→</span>, text: 'Consider selective prepayment of high-interest obligations (>10% APR) when liquidity permits to reduce overall interest cost.' },
+              { icon: <span className="text-blue-500">↔</span>, text: 'Hedge interest rate exposure on floating-rate debt using interest rate swaps or caps to protect against further rate increases.' },
               { icon: <span className="text-emerald-500">✓</span>, text: 'Maintain current repayment schedule while conducting quarterly stress tests to ensure resilience against 20–30% cash flow volatility.' },
             ].map((rec, i) => (
               <li key={i} className="flex items-start gap-3">
@@ -156,6 +171,9 @@ function RepaymentsSpotlight() {
 
 // Repayment Schedule Overview Chart
 function RepaymentScheduleChart() {
+  const { parsedData } = useApp();
+  const data = parsedData?.repaymentScheduleData ?? mockRepaymentSchedule;
+
   return (
     <ChartCard
       title="Repayment Schedule Overview"
@@ -186,7 +204,7 @@ function RepaymentScheduleChart() {
       }
     >
       <ResponsiveContainer width="100%" height={280}>
-        <BarChart data={repaymentScheduleData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
           <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -219,11 +237,12 @@ function RepaymentScheduleChart() {
 
 // Upcoming Repayments Timeline Chart
 function UpcomingRepaymentsChart() {
+  const { parsedData } = useApp();
   const [page, setPage] = useState(0);
   const totalPages = 3;
   const pageDots = Array.from({ length: totalPages }, (_, i) => i);
 
-  const timelineData = [
+  const upcomingData = parsedData?.upcomingRepaymentsData ?? [
     { bucket: '1-7 days', value: 3314 },
     { bucket: '8-14 days', value: 1850 },
     { bucket: '15d-1mo', value: 6549 },
@@ -315,7 +334,7 @@ function UpcomingRepaymentsChart() {
       </div>
 
       <ResponsiveContainer width="100%" height={240}>
-        <BarChart data={timelineData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <BarChart data={upcomingData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
           <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -333,8 +352,8 @@ function UpcomingRepaymentsChart() {
             }}
           />
           <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={60}>
-            {timelineData.map((_, i) => (
-              <Cell key={i} fill={['#2563eb', '#60a5fa', '#93c5fd'][i]} />
+            {upcomingData.map((_, i) => (
+              <Cell key={i} fill={['#2563eb', '#60a5fa', '#93c5fd'][i % 3]} />
             ))}
           </Bar>
         </BarChart>

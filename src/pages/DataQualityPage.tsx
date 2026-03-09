@@ -310,13 +310,22 @@ function IgnoredRowsSection() {
   if (!workbookSession) return null;
   const rows = workbookSession.ignoredRows;
 
+  const categoryVariant = (cat: string | null): 'amber' | 'blue' | 'slate' | 'red' => {
+    if (cat === 'FOREX') return 'blue';
+    if (cat === 'VALUATION') return 'amber';
+    if (cat === 'INVESTMENTS') return 'green' as never;
+    return 'slate';
+  };
+
   const columns = [
-    { header: 'Row #',            render: (r: ClassifiedCashflowRow) => <span className="text-slate-400">{r.sourceRowNumber}</span> },
-    { header: 'UpdateType',       render: (r: ClassifiedCashflowRow) => r.rawUpdateType ? <code className="bg-slate-100 px-1 rounded text-[10px]">{r.rawUpdateType}</code> : <span className="text-slate-300">—</span> },
-    { header: 'Prd Type',         render: (r: ClassifiedCashflowRow) => r.rawPrdType || <span className="text-slate-300">—</span> },
-    { header: 'Prd Type Desc',    render: (r: ClassifiedCashflowRow) => r.rawPrdTypeDesc || <span className="text-slate-300">—</span> },
-    { header: 'Ignore Rule',      render: (r: ClassifiedCashflowRow) => r.ignoreRuleId ? <code className="bg-red-50 text-red-600 px-1 rounded text-[10px]">{r.ignoreRuleId}</code> : <span className="text-slate-300">—</span> },
-    { header: 'Ignore Reason',    render: (r: ClassifiedCashflowRow) => <span className="text-slate-400 max-w-xs truncate block" title={r.ignoreReason ?? ''}>{r.ignoreReason ?? '—'}</span> },
+    { header: 'Row #',               render: (r: ClassifiedCashflowRow) => <span className="text-slate-400">{r.sourceRowNumber}</span> },
+    { header: 'Category',            render: (r: ClassifiedCashflowRow) => r.ignoreCategory ? <Badge label={r.ignoreCategory} variant={categoryVariant(r.ignoreCategory)} /> : <span className="text-slate-300">—</span> },
+    { header: 'UpdateType',          render: (r: ClassifiedCashflowRow) => r.rawUpdateType ? <code className="bg-slate-100 px-1 rounded text-[10px]">{r.rawUpdateType}</code> : <span className="text-slate-300">—</span> },
+    { header: 'Update Type Desc',    render: (r: ClassifiedCashflowRow) => <span className="text-slate-600 max-w-[160px] truncate block" title={r.rawUpdateTypeDesc}>{r.rawUpdateTypeDesc || <span className="text-slate-300">—</span>}</span> },
+    { header: 'Prd Type',            render: (r: ClassifiedCashflowRow) => r.rawPrdType || <span className="text-slate-300">—</span> },
+    { header: 'Prd Type Desc',       render: (r: ClassifiedCashflowRow) => <span className="text-slate-600 max-w-[140px] truncate block" title={r.rawPrdTypeDesc}>{r.rawPrdTypeDesc || <span className="text-slate-300">—</span>}</span> },
+    { header: 'Ignore Rule',         render: (r: ClassifiedCashflowRow) => r.ignoreRuleId ? <code className="bg-red-50 text-red-600 px-1 rounded text-[10px]">{r.ignoreRuleId}</code> : <span className="text-slate-300">—</span> },
+    { header: 'Ignore Reason',       render: (r: ClassifiedCashflowRow) => <span className="text-slate-400 max-w-xs truncate block" title={r.ignoreReason ?? ''}>{r.ignoreReason ?? '—'}</span> },
   ];
 
   return (

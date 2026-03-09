@@ -544,11 +544,12 @@ function stageD_classify(
   );
 
   return normalizedCF.map(row => {
-    // 1. Check explicit ignore rules first (using raw values)
+    // 1. Check explicit ignore rules first (using raw values only)
     const ignoreRule = findMatchingIgnoreRule(
       row.rawUpdateType,
       row.rawPrdType,
       row.rawPrdTypeDesc,
+      row.rawUpdateTypeDesc,
     );
     if (ignoreRule) {
       return {
@@ -566,6 +567,7 @@ function stageD_classify(
         ignored: true,
         ignoreRuleId: ignoreRule.id,
         ignoreReason: ignoreRule.reason,
+        ignoreCategory: ignoreRule.category,
       };
     }
 
@@ -591,6 +593,7 @@ function stageD_classify(
         ignored: true,
         ignoreRuleId: ZERO_AMOUNT_RULE.id,
         ignoreReason: ZERO_AMOUNT_RULE.reason,
+        ignoreCategory: ZERO_AMOUNT_RULE.category,
       };
     }
 
@@ -617,6 +620,7 @@ function stageD_classify(
         ignored: false,
         ignoreRuleId: null,
         ignoreReason: null,
+        ignoreCategory: null,
       };
     }
 
@@ -643,6 +647,7 @@ function stageD_classify(
         ignored: false,
         ignoreRuleId: null,
         ignoreReason: null,
+        ignoreCategory: null,
       };
     }
 
@@ -663,7 +668,7 @@ function stageD_classify(
       mappedInstrumentName: null,
       mappedFlowCode: null,
       mappedFlowCategoryDesc: null,
-      mappingStatus: borrowingsHint ? 'UNMAPPED_REVIEW' : 'UNMAPPED_REVIEW' as MappingStatus,
+      mappingStatus: 'UNMAPPED_REVIEW' as MappingStatus,
       mappingConfidence: 'none' as const,
       mappingReason: borrowingsHint
         ? `No match in Data Foundation. Borrowings-relevance heuristic triggered on: ${[
@@ -676,6 +681,7 @@ function stageD_classify(
       ignored: false,
       ignoreRuleId: null,
       ignoreReason: null,
+      ignoreCategory: null,
     };
   });
 }

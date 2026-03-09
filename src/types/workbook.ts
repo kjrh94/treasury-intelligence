@@ -134,6 +134,17 @@ export type MappingStatus =
   | 'IGNORED_EXPLICIT'
   | 'INSUFFICIENT_DATA';
 
+/**
+ * Category applied to IGNORED_EXPLICIT rows.
+ * Extensible — add new categories here as needed.
+ */
+export type IgnoreCategory =
+  | 'FOREX'
+  | 'INVESTMENTS'
+  | 'VALUATION'
+  | 'ZERO_AMOUNT'
+  | 'OTHER';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // C. Classified (derived) cashflow row — extends normalized
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,6 +167,7 @@ export interface ClassifiedCashflowRow extends CashflowNormalizedRow {
   ignored: boolean;
   ignoreRuleId: string | null;
   ignoreReason: string | null;
+  ignoreCategory: IgnoreCategory | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
